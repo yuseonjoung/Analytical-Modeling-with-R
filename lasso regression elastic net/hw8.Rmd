@@ -1,0 +1,275 @@
+---
+title: "hw8"
+output: html_document
+date: "2022-10-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question 11.1
+
+Using the crime data set uscrime.txt from Questions 8.2, 9.1, and 10.1, build a regression model using: 
+
+
+1.	Stepwise regression  <br> 
+2.	Lasso <br>
+3.	Elastic net  <br>
+
+#### 1.	Stepwise regression
+
+For the stepwise regression, I tried both forward selection and backward elimination methods. For each method, AIC test was done to check if the model was improved after the stepwise regression.  <br>
+
+
+```{r}
+# Load the data 
+data <- read.table("C:/Users/leajo/Documents/ISYE6501/HW8/hw8-SP22/data 11.1/uscrime.txt", header = TRUE)
+```
+**1) Forward selection**
+
+Forward selection starts with a model with no factors. Therefore, the first thing I built is a model with only the interception. 
+
+```{r}
+# Define the intercept-only model, starting with no variables
+intercept_only <- lm(Crime~ 1, data = data)
+intercept_only
+```
+
+AIC score for the interception-only model shows 696.40. 
+
+```{r}
+AIC(intercept_only)
+```
+In order for comparison, a simple regression model with all variables were built and tested with AIC, with the value of 650.03. A simple regression with all variables could contain insignificant variables. 
+
+```{r}
+# Define model with all predictors
+all <- lm(Crime ~., data= data)
+all
+```
+
+```{r}
+AIC(all)
+```
+
+As a result of forward selection, six variables were selected: Po1, Ineq, Ed, M, Prob, and U2, where the residuals and coefficients are as follows: 
+
+```{r}
+# Perform a forward selection stepwise regression 
+forward <- step(intercept_only, direction = 'forward', scope = formula(all), trace = 0)
+forward$anova
+```
+
+```{r}
+forward$coefficients
+```
+
+Moreover, we could see that the AIC decreased compared to the all-variable model, which means the forward selection model has a better fit. 
+
+```{r}
+AIC(forward)
+```
+**2) Backward elimination** 
+
+As for the next step, I built the backward elimination regression. The result shows that 8 variables remained (M, Ed, Po1, M.F, U1, U2, Ineq, Prob) and 7 variables were dropped (So, Time, LF, NW, Po2, Pop, Wealth). 
+
+```{r}
+backward <- step(all, direction = "backward", scope = formula(all), trace =0)
+backward
+```
+
+These are the steps taken in the backward elimination: 
+
+```{r}
+backward$anova
+```
+
+The AIC result of the backward elimination shows a slightly better fit than the forward selection. 
+
+```{r}
+AIC(backward)
+```
+I also quickly compared the R-squared and adjusted R-squared of the models of all variables, the forward selection and the backward elimination. As you can see, the R-squared is the highest when all variables were included. However, it does not directly mean that the model has predictive accuracy, because all the insignificant variables accompany noise to the model from the random patterns. 
+
+
+```{r}
+summary(all)
+```
+```{r}
+summary(forward)
+```
+
+```{r}
+summary(backward)
+```
+
+<br>
+
+#### 2. Lasso regression
+
+For Lasso regression, I first prepared the data by scaling them and splitting into training and test set. Then, I ran a Lasso regression using `glmnet()`, tried to find the best lambda value by `cv.glmnet()` and checked the RMSE of the Lasso regression. 
+
+
+```{r}
+# Scale the data set for Lasso regression
+data_scaled <- scale(data, center = TRUE, scale = TRUE) 
+data_scaled <- as.data.frame(data_scaled)
+head(data_scaled)
+```
+
+The training set contains 70% of the data set and the test set 30%, as well as separated into predictors and response variables and converted into a matrix. 
+
+```{r}
+# Set seed for generating random number
+set.seed(133)
+
+# Split the data set into training and test set
+index <- sample(c(TRUE, FALSE), nrow(data_scaled), replace = TRUE, prob = c(0.7,0.3))
+
+data_scaled_train <- data_scaled[index, ]
+data_scaled_test<- data_scaled[-index, ]
+
+train_x <- as.matrix(data_scaled_train[,1:15])
+train_y <- data_scaled_train$Crime
+
+test_x <- as.matrix(data_scaled_test[,1:15])
+test_y <- data_scaled_test$Crime
+
+```
+
+I ran the Lasso regression on the training data set, and plotted the model coefficients for a range of regularization parameter, lambda (log lambda). The plot shows how Lasso regression works: by increasing the value of lambda, the coefficients become closer to 0 as a process of variable selection.   
+
+```{r}
+library(glmnet)
+
+m.lasso <- glmnet(train_x, train_y, alpha = 1)
+plot(m.lasso, xvar = "lambda", label = TRUE)
+
+```
+
+In the next step, I tried to find the best lambda, which minimizes the residuals between the actual values and the predicted values by using k-fold cross-validation with `cv.glmnet()`. The result shows that when the residuals are minimized, the lambda is 0.02685191. 
+
+```{r}
+m.lasso.cv <- cv.glmnet(train_x, train_y, alpha = 1)
+plot(m.lasso.cv)
+```
+
+```{r}
+m.lasso.cv$lambda.min
+```
+And these are the coefficients of the selected variables by the Lasso regression: 
+
+```{r}
+cf <- as.matrix(coef(m.lasso.cv,m.lasso.cv$lambda.min))
+cf[cf!= 0,]
+```
+
+And this is the RMSE of the chosen Lasso regression:  
+
+```{r}
+m.lasso.cv.pred.train <- predict(m.lasso.cv, train_x, s = "lambda.min")
+sqrt(mean((train_y - m.lasso.cv.pred.train)^2)) # rmse
+
+```
+
+Then, the test dataset was put in the Lasso regression model for prediction and RMSE was calculated. RSME of the test set is higher than that of the training set, which is normal. 
+
+```{r}
+m.lasso.cv.pred.train <- predict(m.lasso.cv, test_x, s = "lambda.min")
+sqrt(mean((test_y - m.lasso.cv.pred.train)^2)) # rmse
+```
+Finally, Lasso Regression was performed with the original data set, with the RMSE value of 0.567.
+
+```{r}
+# Seperate the predictor and response variables
+x <- as.matrix(data_scaled[,1:15])
+y <- data_scaled$Crime
+
+# Run the Lasso regression 
+
+pred <- predict(m.lasso.cv, x, s = "lambda.min")
+sqrt(mean((y -pred)^2)) #RMSE
+
+```
+If we compare the result with RMSE of all variables, we can see that the RMSE is bigger in the Lasso regression. As a result of regularized regression, we traded bias for low variance to prevent overfitting. 
+
+```{r}
+all_scaled <- lm(Crime ~., data= data_scaled)
+sqrt(mean((y - all_scaled$fitted.values)^2)) #RMSE
+```
+<br>
+
+#### 3. Elastic net
+
+Elastic net regression is a mixture of Lasso and Ridge regression, where the alpha value for `glmnet()` lies between 0 and 1. 
+
+Here, I tried to find the best alpha and lambda value using 5-fold cross-validation without splitting the data set, and compared the coefficients and RMSE of the Elastic net regression with the simple regression with all variables. 
+
+For the first step, I trained the Elastic net regression model by 5-fold cross-validation. Three alpha and three lambda values were tested and RMSE was the smallest when the alpha is 0.1 and the lambda is 0.13605.
+
+```{r}
+library("caret")
+
+set.seed(33)
+cv_5 <- trainControl(method = "cv", number = 5)
+
+cv.elnet <- train(
+  Crime ~., data = data_scaled,
+  method = "glmnet", trControl = cv_5, 
+)
+cv.elnet
+```
+
+```{r}
+# Saving the best alpha and lambda as a variable
+best_elnet <- cv.elnet$bestTune
+best_elnet
+```
+If we expand the tuning length to 10, it tests 10 alpha and lambda values and returns each result. The smallest RMSE was when alpha is 1.0, basically like a Lasso regression. However, as the purpose of this exercise is to try Elastic net, I will go with the best result from the initial Elastic net regression, alpha 0.1 and lambda 0.13605. 
+
+```{r}
+cv.elnet2 <- train(
+  Crime ~., data = data_scaled,
+  method = "glmnet", trControl = cv_5, 
+  tuneLength = 10
+)
+cv.elnet2
+```
+
+So, in the next step, I performed Elastic net regression with the best values of alpha and lambda from the cross-validation.  
+
+```{r}
+m.elnet <- glmnet(x, y, lambda = best_elnet$lambda, alpha = best_elnet$alpha)
+```
+
+As a result of the regularization, we can see that the coefficients significantly decreased compared to the simple regression with all variables. Among the variables, "Pop" was dropped. 
+
+Because we are not able to completely identify random patterns from the real patterns, we are reducing the overall fit to prevent overfitting. By doing this, we can add bias but help reducing variances. 
+
+```{r}
+# Coefficients for elastic net
+elnet_eff_mtr <- coef(m.elnet)
+elnet_eff_df <- as.data.frame(as.matrix(elnet_eff_mtr))
+
+# Coefficients for simple regression 
+all_coeff<- as.data.frame(all_scaled$coefficients)
+
+
+coeff_merge <- merge(elnet_eff_df, all_coeff, by = 'row.names')
+colnames(coeff_merge) <- c("Predictors","Elastic net", "Simple regression")
+
+coeff_merge
+
+```
+
+We confirm here that the RMSE of the Elastic net regression is larger than the RMSE of the simple regression of all variables, 0.439003. It means that there was a trade-off, as we added more bias by reducing variables and variances.
+
+```{r}
+# Model prediction of Elastic net and RSME
+
+pred.elnet <- predict(m.elnet, x)
+sqrt(mean((y - pred.elnet )^2))
+
+```
+
