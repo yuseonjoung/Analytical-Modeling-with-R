@@ -1,0 +1,207 @@
+---
+title: "HW10"
+output: html_document
+date: "2022-11-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 14.1
+The breast cancer data set breast-cancer-wisconsin.data.txt has missing values. <br>
+
+1.	Use the mean/mode imputation method to impute values for the missing data. <br>
+
+2.	Use regression to impute values for the missing data. <br>
+
+3.	Use regression with perturbation to impute values for the missing data. <br>
+    
+4.	(Optional) Compare the results and quality of classification models (e.g., SVM, KNN) build using <br>
+  + the data sets from questions 1,2,3;  <br>
+  + the data that remains after data points with missing values are removed; and <br>
+  + the data set when a binary variable is introduced to indicate missing values.<br>
+
+
+`Answer:` 
+
+
+
+In this exercise, I will run KNN model four times, each with different method of handling missing values: 1) dropping the missing value, 2) replacing with mean/mode, 3) replacing with prediction from linear regression and 4) replacing with prediction from Lasso regression. Then, I will compare the accuracy level of each method.   
+
+```{r}
+# Loading the libraries 
+
+library(caret)
+library(ggplot2)
+library(mice)
+```
+
+Using the description of the data on the website, I changed the column names more recognizably. Because the `Class` column in the original data set had 2 and 4, I made it into categorical variables with 0 and 1, 0 representing benign and 1 representing malignant. 
+
+```{r}
+# Load the data set 
+
+data <- read.csv("C:/Users/leajo/Documents/ISYE6501/HW10/hw10-SP22/data 14.1/breast-cancer-wisconsin.data.txt", na.string ="?")
+
+colnames(data) <- c("Id", "Clump_Thickness", "Uniformity_of_Cell_Size", "Uniformity_of_Cell_Shape", "Marginal_Adhesion", "Single_Epithelial_Cell_Size", "Bare_Nuclei", "Bland_Chromatin", "Normal_Nucleoli", "Mitoses", "Class")
+
+data$Class <- as.factor(data$Class)
+levels(data$Class) <- c(0, 1)
+
+head(data)
+```
+
+From the summary, we can check that there are 16 missing values in the `Bare Nuclei` column. 
+```{r}
+summary(data)
+```
+If we check the pattern, we can see that the missing values are only in one column. Therefore, we can use the mean or mode of the column, or using other columns as predictors we can run regression to predict the missing number. 
+
+```{r}
+md.pattern(data, plot = FALSE)
+```
+
+
+After filling the missing values, to test the quality of each method, we will split the data into training and test set, run k-nearest neighbor classification, and check the accuracy rate of each method. As we are repeating the process, we will make the process into two functions. 
+
+```{r}
+# We do not need Id column for further modeling, so we drop it for the new training and test set.
+
+split_dataset <- function(data){
+  set.seed(1234)
+  data_new <- subset(data, select = -c(Id)) 
+  train_size <- floor(0.7 * nrow(data_new))
+  train_ind <- sample(c(1:nrow(data_new)), size =train_size, replace = FALSE)
+  train <- data_new[train_ind, ]
+  test <- data_new[-train_ind, ]
+  
+  return (list("train"= train, "test" = test))
+}
+
+```
+
+
+```{r} 
+# Making a function for running KNN model and returning its best K value and the accuracy level
+
+model_KNN <- function(train, test, kvector){
+  best_K <- 0
+  best_accuracy <- 0
+  
+  for (K in kvector){
+    fit <- knn3(Class ~., data = train, k = K)
+    predictions <- predict(fit, test[0:(length(test)-1)], type = "class") 
+    accuracy <- round((sum(predictions == test$Class) / length(test$Class)), digits = 3)
+    
+    if (accuracy > best_accuracy){
+      best_K <- K
+      best_accuracy <- accuracy 
+    }
+  }
+  return(list("best_K" = best_K, "best_accuracy" = best_accuracy ))
+}
+
+```
+
+The KNN model will iterate with the K-value from 1 to 15.  
+
+```{r}
+kvector <- seq(1, 15)
+```
+
+Before going through the three method, I dropped the missing values and ran KNN model. It showed the accuracy level of 97.6% with the best K value of 5. 
+
+```{r}
+data_dropped <- na.omit(data)
+traintest <- split_dataset(data_dropped)
+
+res1 <- model_KNN(traintest$train, traintest$test, kvector)
+print(res1)
+
+```
+
+**1.	Use the mean/mode imputation method to impute values for the missing data** <br>
+
+The KNN model showed the accuracy rate of 97.1% (K = 9) when using mean and the accuracy rate of 95.7% (K = 4) when using mode for the missing values. 
+
+```{r}
+# Using mean for the missing values and run KNN model 
+
+data_mean <- data
+data_mean$Bare_Nuclei[is.na(data_mean$Bare_Nuclei)] <- mean(data_mean$Bare_Nuclei, na.rm = TRUE)
+traintest <- split_dataset(data_mean)
+res2 <- model_KNN(traintest$train, traintest$test, kvector)
+
+print(res2)
+```
+
+```{r}
+# Using mode for the missing values and run KNN model 
+
+data_mode <- data
+data_mode$Bare_Nuclei[is.na(data_mode$Bare_Nuclei)] <- mode(data_mode$Bare_Nuclei)
+traintest <- split_dataset(data_mode)
+res3 <- model_KNN(traintest$train, traintest$test, kvector)
+
+print(res3)
+```
+
+**2.	Use regression to impute values for the missing data** <br>
+
+When I used regression to fill out the missing value, the highest accuracy rate was 97.1% with the K-value 11. 
+
+
+```{r}
+reg <- mice(data, method ="norm.predict", m = 1)
+```
+
+```{r}
+
+data_reg <- complete(reg)
+traintest <- split_dataset(data_reg)
+res4 <- model_KNN(traintest$train, traintest$test, kvector)
+
+print(res4)
+
+```
+
+**3.	Use regression with perturbation to impute values for the missing data**
+
+Finally, for regression with perturbation, I decided to use lasso regression, as there are many variables in the dataset. The highest accuracy rate of the KNN model was 97.1% with the K-value 3. 
+
+
+```{r}
+perturbation <- mice(data, method ="lasso.norm", m = 1)
+
+```
+
+
+```{r}
+data_perturbation <- complete(perturbation)
+traintest <- split_dataset(data_perturbation)
+res5 <- model_KNN(traintest$train, traintest$test, kvector)
+
+print(res5)
+```
+To conclude, when using mean, regression and regression with perturbation showed similarly high level of accuracy. Using mode showed the lowest level of accuracy. 
+Dropping the missing value showed the highest level of accuracy, but with only small differences. 
+
+
+### 15.1
+Describe a situation or problem from your job, everyday life, current events, etc., for which optimization would be appropriate. What data would you need? <br>
+
+`Answer:` 
+
+Decreasing the CO2 emission in the operations of companies is one of the tasks that many companies are facing nowadays. One of the ways to decrease CO2 emission is by optimizing the number of taking flights for a business trip, by replacing it to a video call or by using train or car, which takes more time but has less carbon footprint. However, in replacing flights, companies do not want to lose the profitability. Therefore, optimization can help finding the optimized number of business travel by flights. <br>
+
+For variables, we need the CO2 emission of flights to reach the office of each sales accounts (the list of clients), the maximum of the CO2 emission that the companies can allow per year (the goal of the company), the profit loss of the company when the meeting with the client is replaced to online instead of offline, and the profit loss of the company per time when the employee spends time on the transportation instead of working. Hence, the data should be collected or modeled for the variables accordingly. <br>
+
+For constraint, the total of the CO2 emission generated from travelling should be less than the maximum of the CO2 emission in the own operation that the company announced as their goal.  <br>
+
+As an objective function, the sum of the expected loss in profit should be minimized.  <br>
+
+
+
+
+
